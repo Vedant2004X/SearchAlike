@@ -1,47 +1,89 @@
+import sys
 import os
 from pathlib import Path
 import torch
-from pathlib import Path
-
-# Project root directory (auto-detected)
-BASE_DIR = Path(__file__).resolve().parent
-
-# Data directories
-DATA_DIR = BASE_DIR / "data" / "images"
-
-# Static directories (for web)
-STATIC_DIR = BASE_DIR / "static"
-STATIC_IMAGES_DIR = STATIC_DIR / "images"
-UPLOAD_DIR = STATIC_DIR / "uploads"
-
-# Saved files
-EMBEDDINGS_FILE = BASE_DIR / "embeddings.npy"
-FAISS_INDEX_FILE = BASE_DIR / "faiss.index"
-IMAGE_PATHS_FILE = BASE_DIR / "image_paths.pkl"
+import logging
 
 # ============================================================================
-# BASE CONFIGURATION
+# LOGGING SETUP
 # ============================================================================
 
-# Base directory
-BASE_DIR = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 
-# Paths
-UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
+# ============================================================================
+# BASE DIRECTORY - AUTO-DETECT FOR EXE & SCRIPT
+# ============================================================================
+
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable (PyInstaller)
+    BASE_DIR = Path(sys._MEIPASS)
+    print(f"[CONFIG] Running from PyInstaller bundle: {BASE_DIR}")
+else:
+    # Running as script
+    BASE_DIR = Path(__file__).resolve().parent
+    print(f"[CONFIG] Running as script from: {BASE_DIR}")
+
+# ============================================================================
+# DATA DIRECTORIES
+# ============================================================================
+
 DATA_FOLDER = BASE_DIR / 'data'
 IMAGES_FOLDER = DATA_FOLDER / 'images'
 EMBEDDINGS_FOLDER = DATA_FOLDER / 'embeddings'
 MODEL_FOLDER = DATA_FOLDER / 'model'
+
+# Static directories (for web)
+STATIC_DIR = BASE_DIR / 'static'
+UPLOAD_FOLDER = BASE_DIR / 'static' / 'uploads'
+
+# Checkpoint and logging directories
 CHECKPOINT_FOLDER = BASE_DIR / 'checkpoints'
 LOG_DIR = BASE_DIR / 'runs'
 VIZ_OUTPUT_DIR = BASE_DIR / 'visualizations'
+
+# ============================================================================
+# ENSURE ALL DIRECTORIES EXIST
+# ============================================================================
+
+_REQUIRED_DIRS = [
+    DATA_FOLDER,
+    IMAGES_FOLDER,
+    EMBEDDINGS_FOLDER,
+    MODEL_FOLDER,
+    STATIC_DIR,
+    UPLOAD_FOLDER,
+    CHECKPOINT_FOLDER,
+    LOG_DIR,
+    VIZ_OUTPUT_DIR
+]
+
+for folder in _REQUIRED_DIRS:
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"[CONFIG] Warning: Could not create {folder}: {e}")
+
+print(f"[CONFIG] Data folder: {DATA_FOLDER}")
+print(f"[CONFIG] Images folder: {IMAGES_FOLDER}")
+print(f"[CONFIG] Embeddings folder: {EMBEDDINGS_FOLDER}")
+
+# ============================================================================
+# FEATURE FILES & INDICES
+# ============================================================================
+
+# Pretrained model files
+EMBEDDINGS_FILE = EMBEDDINGS_FOLDER / 'features.npy'
+IMAGE_PATHS_FILE = EMBEDDINGS_FOLDER / 'image_paths.pkl'
+FAISS_INDEX_FILE = EMBEDDINGS_FOLDER / 'faiss_index.bin'
+
+# Triplet model files
+TRIPLET_EMBEDDINGS_FILE = EMBEDDINGS_FOLDER / 'triplet_features.npy'
+TRIPLET_IMAGE_PATHS_FILE = EMBEDDINGS_FOLDER / 'triplet_image_paths.pkl'
+TRIPLET_FAISS_INDEX = EMBEDDINGS_FOLDER / 'triplet_faiss_index.bin'
+
+# PCA model
 PCA_COMPONENTS = 128
 PCA_MODEL_FILE = EMBEDDINGS_FOLDER / 'pca_model.pkl'
-
-# Create directories if they don't exist
-for folder in [UPLOAD_FOLDER, DATA_FOLDER, IMAGES_FOLDER, EMBEDDINGS_FOLDER,
-               MODEL_FOLDER, CHECKPOINT_FOLDER, LOG_DIR, VIZ_OUTPUT_DIR]:
-    folder.mkdir(parents=True, exist_ok=True)
 
 # ============================================================================
 # FLASK CONFIGURATION
@@ -52,18 +94,17 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 
 # Flask deployment
-FLASK_HOST = '0.0.0.0'
+FLASK_HOST = '127.0.0.1'
 FLASK_PORT = 5000
-FLASK_DEBUG = True
+FLASK_DEBUG = False
 
 # ============================================================================
-# AUTO-DETECTION: Check if trained model exists
+# MODEL SELECTION - AUTO-DETECTION
 # ============================================================================
 
 TRIPLET_MODEL_PATH = CHECKPOINT_FOLDER / 'best_model.pth'
 
 
-# Auto-detect if we should use triplet model
 def should_use_triplet_model():
     """Check if trained triplet model exists and is valid"""
     if TRIPLET_MODEL_PATH.exists():
@@ -71,22 +112,29 @@ def should_use_triplet_model():
             # Try to load checkpoint to verify it's valid
             checkpoint = torch.load(TRIPLET_MODEL_PATH, map_location='cpu')
             if 'model_state_dict' in checkpoint:
+                print(f"[CONFIG] Found trained triplet model: {TRIPLET_MODEL_PATH}")
                 return True
-        except Exception:
+        except Exception as e:
+            print(f"[CONFIG] Triplet model exists but is invalid: {e}")
             return False
     return False
 
 
 USE_TRIPLET_MODEL = should_use_triplet_model()
 
-# Auto-detect GPU
+# ============================================================================
+# HARDWARE DETECTION
+# ============================================================================
+
 USE_GPU = torch.cuda.is_available()
 DEVICE = 'cuda' if USE_GPU else 'cpu'
 
-print(f"🚀 Using device: {DEVICE.upper()}")
+print(f"[CONFIG] Using device: {DEVICE.upper()}")
 if USE_GPU:
-    print(f"   GPU: {torch.cuda.get_device_name(0)}")
-    print(f"   CUDA Version: {torch.version.cuda}")
+    print(f"[CONFIG] GPU: {torch.cuda.get_device_name(0)}")
+    print(f"[CONFIG] CUDA Version: {torch.version.cuda}")
+else:
+    print(f"[CONFIG] No GPU available - using CPU (slower)")
 
 # ============================================================================
 # MODEL CONFIGURATION
@@ -130,8 +178,8 @@ TRAIN_LEARNING_RATE = 0.0001
 TRAIN_WEIGHT_DECAY = 1e-4
 
 # Triplet mining settings
-TRIPLET_MINING_MODE = 'online'
-TRIPLET_LOSS_TYPE = 'hardest'
+TRIPLET_MINING_MODE = 'online'  # 'online' or 'offline'
+TRIPLET_LOSS_TYPE = 'hardest'  # 'hardest', 'semi-hard', or 'all'
 
 # Data split
 VAL_SPLIT = 0.2
@@ -164,20 +212,6 @@ ENABLE_GRADIENT_CLIPPING = True
 GRADIENT_CLIP_VALUE = 1.0
 ENABLE_AUGMENTATION = True
 ENABLE_MIXED_PRECISION = False
-
-# ============================================================================
-# FEATURE FILES & INDICES
-# ============================================================================
-
-# Pretrained model files
-EMBEDDINGS_FILE = EMBEDDINGS_FOLDER / 'features.npy'
-IMAGE_PATHS_FILE = EMBEDDINGS_FOLDER / 'image_paths.pkl'
-FAISS_INDEX_FILE = EMBEDDINGS_FOLDER / 'faiss_index.bin'
-
-# Triplet model files
-TRIPLET_EMBEDDINGS_FILE = EMBEDDINGS_FOLDER / 'triplet_features.npy'
-TRIPLET_IMAGE_PATHS_FILE = EMBEDDINGS_FOLDER / 'triplet_image_paths.pkl'
-TRIPLET_FAISS_INDEX = EMBEDDINGS_FOLDER / 'triplet_faiss_index.bin'
 
 # ============================================================================
 # LABEL GENERATION SETTINGS
@@ -219,66 +253,87 @@ AUTO_TRAIN_ON_FIRST_RUN = True
 # HELPER FUNCTIONS
 # ============================================================================
 
+
 def get_model_config():
-    """Get current model configuration."""
+    """Get current model configuration as dictionary"""
     return {
         'use_triplet': USE_TRIPLET_MODEL,
         'model_name': MODEL_NAME if not USE_TRIPLET_MODEL else 'triplet',
         'backbone': TRIPLET_BACKBONE if USE_TRIPLET_MODEL else MODEL_NAME,
         'embedding_dim': TRIPLET_EMBEDDING_DIM if USE_TRIPLET_MODEL else FEATURE_DIM,
         'device': DEVICE,
-        'use_gpu': USE_GPU
+        'use_gpu': USE_GPU,
+        'model_path': str(TRIPLET_MODEL_PATH) if USE_TRIPLET_MODEL else 'pretrained'
     }
 
 
 def check_training_requirements():
-    """Check if system is ready for training"""
+    """
+    Check if system is ready for training
+
+    Returns:
+        tuple: (ready: bool, messages: list)
+    """
     issues = []
 
     # Check if images exist
     if not IMAGES_FOLDER.exists():
-        issues.append(f"❌ Images folder not found: {IMAGES_FOLDER}")
+        issues.append(f"   ❌ Images folder not found: {IMAGES_FOLDER}")
         return False, issues
 
-    # Count images
+    # Count images in all subfolders
     image_files = []
-    for ext in ALLOWED_EXTENSIONS:
-        image_files.extend(list(IMAGES_FOLDER.rglob(f'*.{ext}')))
-        image_files.extend(list(IMAGES_FOLDER.rglob(f'*.{ext.upper()}')))
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
 
+    for ext in valid_extensions:
+        image_files.extend(list(IMAGES_FOLDER.rglob(f'*{ext}')))
+        image_files.extend(list(IMAGES_FOLDER.rglob(f'*{ext.upper()}')))
+
+    # Remove duplicates
+    image_files = list(set(image_files))
     num_images = len(image_files)
 
     if num_images == 0:
-        issues.append(f"❌ No images found in {IMAGES_FOLDER}")
+        issues.append(f"   ❌ No images found in {IMAGES_FOLDER}")
+        issues.append(f"      Please organize images in subfolders by category")
         return False, issues
 
     if num_images < MIN_IMAGES_FOR_TRAINING:
-        issues.append(f"⚠️  Only {num_images} images found. Recommend {MIN_IMAGES_FOR_TRAINING}+ for good results")
+        issues.append(
+            f"   ⚠️  Only {num_images} images found. "
+            f"Recommend {MIN_IMAGES_FOR_TRAINING}+ for good results"
+        )
         return False, issues
 
-    return True, [f"✅ Found {num_images} images ready for training"]
+    # Check for multiple classes
+    subfolders = [f for f in IMAGES_FOLDER.iterdir() if f.is_dir()]
+    if len(subfolders) < 2:
+        issues.append(f"   ⚠️  Only 1 category found. Need at least 2 for training")
+        return False, issues
+
+    return True, [f"   ✅ Found {num_images} images in {len(subfolders)} categories"]
 
 
 def print_startup_info():
-    """Print startup information"""
+    """Print detailed startup information"""
     print("\n" + "=" * 70)
-    print("🚀 IMAGE SIMILARITY SEARCH - SMART AUTO-TRAIN")
+    print(" 🔍 IMAGE SIMILARITY SEARCH - SEARCHALIKE")
     print("=" * 70)
 
     print(f"\n📊 Model Status:")
     if USE_TRIPLET_MODEL:
         print(f"   ✅ Using Trained Triplet Model")
-        print(f"   📁 Model: {TRIPLET_MODEL_PATH}")
-        print(f"   🎯 Embedding Dim: {TRIPLET_EMBEDDING_DIM}")
+        print(f"      Model: {TRIPLET_MODEL_PATH}")
+        print(f"      Embedding Dim: {TRIPLET_EMBEDDING_DIM}")
     else:
-        print(f"   ⚠️  No trained model found")
-        print(f"   📌 Using pretrained {MODEL_NAME} (fallback)")
+        print(f"   ℹ️  No trained model found")
+        print(f"      Using pretrained {MODEL_NAME} (fallback)")
         if AUTO_TRAIN_ON_FIRST_RUN:
             ready, messages = check_training_requirements()
             if ready:
-                print(f"   🔄 Will auto-train on startup")
+                print(f"      Will auto-train on startup")
             else:
-                print(f"   ❌ Cannot auto-train:")
+                print(f"      Cannot auto-train - requirements not met:")
                 for msg in messages:
                     print(f"      {msg}")
 
@@ -286,29 +341,149 @@ def print_startup_info():
     print(f"   Device: {DEVICE.upper()}")
     if USE_GPU:
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        print(f"   CUDA: {torch.version.cuda}")
+    else:
+        print(f"   ⚠️  CPU Mode (slow) - GPU recommended for faster processing")
 
     print(f"\n📁 Paths:")
+    print(f"   Base: {BASE_DIR}")
     print(f"   Images: {IMAGES_FOLDER}")
+    print(f"   Embeddings: {EMBEDDINGS_FOLDER}")
     print(f"   Checkpoints: {CHECKPOINT_FOLDER}")
+    print(f"   Uploads: {UPLOAD_FOLDER}")
+
+    print(f"\n⚙️  Configuration:")
+    print(f"   Max file size: {MAX_CONTENT_LENGTH / (1024 * 1024):.0f}MB")
+    print(f"   Top-K results: {TOP_K}")
+    print(f"   Auto-train: {'Enabled' if AUTO_TRAIN_ON_FIRST_RUN else 'Disabled'}")
+    print(f"   Min images for training: {MIN_IMAGES_FOR_TRAINING}")
 
     print("=" * 70 + "\n")
 
 
+def validate_paths():
+    """Validate all required paths are accessible"""
+    print("\n[CONFIG] Validating paths...")
+
+    paths_to_check = {
+        'Base': BASE_DIR,
+        'Data': DATA_FOLDER,
+        'Images': IMAGES_FOLDER,
+        'Embeddings': EMBEDDINGS_FOLDER,
+        'Uploads': UPLOAD_FOLDER,
+        'Checkpoints': CHECKPOINT_FOLDER,
+    }
+
+    all_valid = True
+    for name, path in paths_to_check.items():
+        if path.exists():
+            print(f"  ✅ {name}: {path}")
+        else:
+            print(f"  ❌ {name}: {path} (does not exist)")
+            all_valid = False
+
+    return all_valid
+
+
+def get_image_count():
+    """Get total number of images in dataset"""
+    if not IMAGES_FOLDER.exists():
+        return 0
+
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
+    count = 0
+
+    for ext in valid_extensions:
+        count += len(list(IMAGES_FOLDER.rglob(f'*{ext}')))
+        count += len(list(IMAGES_FOLDER.rglob(f'*{ext.upper()}')))
+
+    return len(set(list(IMAGES_FOLDER.rglob('*.*'))))  # Return unique files
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
 __all__ = [
-    'BASE_DIR', 'UPLOAD_FOLDER', 'DATA_FOLDER', 'IMAGES_FOLDER',
-    'EMBEDDINGS_FOLDER', 'MODEL_FOLDER', 'CHECKPOINT_FOLDER', 'LOG_DIR',
-    'SECRET_KEY', 'MAX_CONTENT_LENGTH', 'ALLOWED_EXTENSIONS',
-    'FLASK_HOST', 'FLASK_PORT', 'FLASK_DEBUG',
-    'USE_TRIPLET_MODEL', 'MODEL_NAME', 'FEATURE_DIM',
-    'TRIPLET_MODEL_PATH', 'TRIPLET_EMBEDDING_DIM', 'TRIPLET_MARGIN',
-    'TRIPLET_BACKBONE', 'IMAGE_SIZE',
-    'TOP_K', 'SIMILARITY_THRESHOLD', 'USE_FAISS',
-    'EMBEDDINGS_FILE', 'IMAGE_PATHS_FILE', 'FAISS_INDEX_FILE',
-    'TRIPLET_EMBEDDINGS_FILE', 'TRIPLET_FAISS_INDEX',
-    'USE_GPU', 'DEVICE',
-    'TRAIN_BATCH_SIZE', 'TRAIN_EPOCHS', 'TRAIN_LEARNING_RATE',
-    'TRAIN_WEIGHT_DECAY', 'TRIPLET_LOSS_TYPE', 'TRIPLET_MINING_MODE',
-    'VAL_SPLIT', 'EARLY_STOPPING_PATIENCE', 'NUM_WORKERS',
-    'get_model_config', 'check_training_requirements', 'print_startup_info',
-    'should_use_triplet_model', 'AUTO_TRAIN_ON_FIRST_RUN', 'MIN_IMAGES_FOR_TRAINING'
+    # Paths
+    'BASE_DIR',
+    'DATA_FOLDER',
+    'IMAGES_FOLDER',
+    'EMBEDDINGS_FOLDER',
+    'MODEL_FOLDER',
+    'STATIC_DIR',
+    'UPLOAD_FOLDER',
+    'CHECKPOINT_FOLDER',
+    'LOG_DIR',
+    'VIZ_OUTPUT_DIR',
+
+    # Files
+    'EMBEDDINGS_FILE',
+    'IMAGE_PATHS_FILE',
+    'FAISS_INDEX_FILE',
+    'TRIPLET_EMBEDDINGS_FILE',
+    'TRIPLET_IMAGE_PATHS_FILE',
+    'TRIPLET_FAISS_INDEX',
+    'PCA_MODEL_FILE',
+    'TRIPLET_MODEL_PATH',
+
+    # Flask
+    'SECRET_KEY',
+    'MAX_CONTENT_LENGTH',
+    'ALLOWED_EXTENSIONS',
+    'FLASK_HOST',
+    'FLASK_PORT',
+    'FLASK_DEBUG',
+
+    # Models
+    'USE_TRIPLET_MODEL',
+    'MODEL_NAME',
+    'FEATURE_DIM',
+    'TRIPLET_BACKBONE',
+    'TRIPLET_EMBEDDING_DIM',
+    'TRIPLET_MARGIN',
+    'IMAGE_SIZE',
+    'IMAGENET_MEAN',
+    'IMAGENET_STD',
+
+    # Search
+    'TOP_K',
+    'SIMILARITY_THRESHOLD',
+    'USE_FAISS',
+    'FAISS_INDEX_TYPE',
+
+    # Training
+    'TRAIN_BATCH_SIZE',
+    'TRAIN_EPOCHS',
+    'TRAIN_LEARNING_RATE',
+    'TRAIN_WEIGHT_DECAY',
+    'TRIPLET_MINING_MODE',
+    'TRIPLET_LOSS_TYPE',
+    'VAL_SPLIT',
+    'EARLY_STOPPING_PATIENCE',
+    'SAVE_CHECKPOINT_EVERY',
+    'FREEZE_BACKBONE_INITIALLY',
+    'NUM_WORKERS',
+    'PIN_MEMORY',
+    'TRIPLETS_PER_ANCHOR',
+    'PCA_COMPONENTS',
+
+    # Hardware
+    'USE_GPU',
+    'DEVICE',
+
+    # Settings
+    'AUTO_TRAIN_ON_FIRST_RUN',
+    'MIN_IMAGES_FOR_TRAINING',
+    'UPLOAD_CLEANUP_HOURS',
+    'LOG_LEVEL',
+    'ENABLE_TENSORBOARD',
+
+    # Functions
+    'get_model_config',
+    'check_training_requirements',
+    'print_startup_info',
+    'validate_paths',
+    'get_image_count',
+    'should_use_triplet_model',
 ]
