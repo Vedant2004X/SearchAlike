@@ -32,6 +32,7 @@
             border: 3px solid var(--primary);
             box-shadow: 0 10px 40px rgba(0, 212, 255, 0.3);
             animation: scaleIn 0.6s ease-out;
+            background: var(--dark);
         }
 
         .query-info h2 {
@@ -172,10 +173,23 @@
             height: 100%;
             object-fit: cover;
             transition: transform 0.4s ease;
+            background: var(--dark);
         }
 
         .result-card:hover .result-image {
             transform: scale(1.1);
+        }
+
+        .result-image.broken {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.05), rgba(255, 0, 110, 0.05));
+            color: #6b7280;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            padding: 20px;
         }
 
         .result-rank {
@@ -193,6 +207,7 @@
             color: var(--dark);
             font-size: 16px;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            z-index: 10;
         }
 
         .result-details {
@@ -319,7 +334,7 @@
         <div class="container">
             <div class="header-content">
                 <div class="logo">
-                    <div class="logo-icon">🔍</div>
+                    <div class="logo-icon">Search</div>
                     <span class="logo-text">VisuaMatch</span>
                 </div>
                 <div class="stats">
@@ -334,11 +349,17 @@
 
     <main>
         <div class="container">
-            <a href="{{ url_for('index') }}" class="back-btn">← New Search</a>
+            <a href="{{ url_for('index') }}" class="back-btn">Back to Search</a>
 
             <div class="results-container">
                 <div class="query-section">
-                    <img src="{{ url_for('static', filename='uploads/' + query_image) }}" alt="Query" class="query-image">
+                    <img
+                        src="{{ url_for('static', filename='uploads/' + query_image) }}"
+                        alt="Query"
+                        class="query-image"
+                        id="query-img"
+                        onerror="handleQueryImageError()"
+                    >
                     <div class="query-info">
                         <h2>Query Image</h2>
                         <div class="query-meta">
@@ -356,14 +377,20 @@
 
                 {% if similar_images %}
                     <div style="margin-bottom: 40px;">
-                        <h3 class="results-title">🎯 Top {{ num_results }} Matches</h3>
+                        <h3 class="results-title">Top {{ num_results }} Matches</h3>
 
                         <div class="results-grid">
                             {% for image in similar_images %}
                                 <div class="result-card">
                                     <div class="result-image-wrapper">
-                                        <img src="{{ image.path }}" alt="Result" class="result-image">
-
+                                        <img
+                                            src="{{ image.path }}"
+                                            alt="Result {{ loop.index }}"
+                                            class="result-image"
+                                            data-index="{{ loop.index0 }}"
+                                            onload="handleImageLoad(this)"
+                                            onerror="handleImageError(this)"
+                                        >
                                         <div class="result-rank">{{ loop.index }}</div>
                                     </div>
                                     <div class="result-details">
@@ -377,8 +404,11 @@
                                             </div>
                                         </div>
                                         <div class="result-filename">
-                                            <span class="result-filename-label">📄 File</span>
+                                            <span class="result-filename-label">File</span>
                                             {{ image.filename }}
+                                        </div>
+                                        <div style="font-size: 11px; color: #6b7280; margin-top: 8px;">
+                                            <span class="result-status" data-index="{{ loop.index0 }}">Loading...</span>
                                         </div>
                                     </div>
                                 </div>
@@ -387,7 +417,7 @@
                     </div>
                 {% else %}
                     <div class="no-results">
-                        <div class="no-results-icon">🔍</div>
+                        <div class="no-results-icon">Search</div>
                         <h3 style="color: var(--primary); margin-bottom: 10px;">No Matches Found</h3>
                         <p>Try uploading a different image</p>
                     </div>
@@ -405,6 +435,91 @@
     </main>
 
     <script>
+        function handleImageLoad(img) {
+            const index = img.getAttribute('data-index');
+            const status = document.querySelector(`[data-index="${index}"]`);
+            if (status) {
+                status.textContent = 'Loaded';
+                status.style.color = '#66dd99';
+            }
+            console.log(`[RESULT] Image ${index} loaded successfully: ${img.src}`);
+        }
+
+        function handleImageError(img) {
+            const index = img.getAttribute('data-index');
+            const src = img.src;
+
+            console.error(`[RESULT] Image ${index} failed to load: ${src}`);
+
+            const status = document.querySelector(`[data-index="${index}"]`);
+            if (status) {
+                status.textContent = 'Failed to load';
+                status.style.color = '#ff6b9d';
+            }
+
+            // Create error placeholder
+            const placeholder = document.createElement('div');
+            placeholder.style.cssText = `
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(135deg, rgba(0, 212, 255, 0.05), rgba(255, 0, 110, 0.05));
+                color: #6b7280;
+                font-size: 14px;
+                font-weight: 600;
+                text-align: center;
+                padding: 20px;
+            `;
+            placeholder.textContent = 'Image not available';
+
+            img.parentElement.appendChild(placeholder);
+            img.style.display = 'none';
+        }
+
+        function handleQueryImageError() {
+            const img = document.getElementById('query-img');
+            console.error(`[RESULT] Query image failed to load: ${img.src}`);
+
+            const placeholder = document.createElement('div');
+            placeholder.style.cssText = `
+                width: 200px;
+                height: 200px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(255, 0, 110, 0.1));
+                border-radius: 18px;
+                border: 3px solid var(--primary);
+                color: #6b7280;
+                font-size: 14px;
+                font-weight: 600;
+                text-align: center;
+                padding: 20px;
+                box-sizing: border-box;
+            `;
+            placeholder.textContent = 'Query Image Not Found';
+
+            img.replaceWith(placeholder);
+        }
+
+        // Debug: Log all image paths on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('[RESULT] Page loaded');
+            const images = document.querySelectorAll('.result-image');
+            console.log(`[RESULT] Found ${images.length} result images`);
+
+            images.forEach((img, idx) => {
+                console.log(`[RESULT] Image ${idx}: ${img.src}`);
+            });
+
+            const queryImg = document.getElementById('query-img');
+            if (queryImg) {
+                console.log(`[RESULT] Query image: ${queryImg.src}`);
+            }
+        });
+
         // Add download functionality
         document.querySelectorAll('.download-btn').forEach(btn => {
             btn.addEventListener('click', function() {
